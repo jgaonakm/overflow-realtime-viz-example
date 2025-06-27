@@ -1,0 +1,12 @@
+kind: Service
+apiVersion: v1
+metadata:
+  name: chart-svc
+spec: 
+  type: LoadBalancer
+  ports:
+    - name: chart
+      port: 80
+      targetPort: http
+  selector:
+    app: chart 

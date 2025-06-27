@@ -1,0 +1,208 @@
+﻿@page
+@model IndexModel
+@{
+    ViewData["Title"] = "Requests charts";
+}
+
+<div style="width: 100%;">
+    <h3>Request Flow </h3>
+    <svg id="sankeyChart" width="1000" height="400"></svg>
+</div>
+
+<div>
+    <h3>Bar Chart</h3>
+    <svg id="barChart" width="400" height="200"></svg>
+</div>
+
+<div>
+    <h3>Ratio</h3>
+    <svg id="pieChart" width="300" height="300"></svg>
+</div>
+
+
+<script src="https://d3js.org/d3.v7.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/d3-sankey@0.12.3/dist/d3-sankey.min.js"></script>
+<script src="~/js/signalr/dist/browser/signalr.js"></script>
+
+
+<script>
+    // Count gets updated on each page load
+    // TODO: Add to browser storage maybe?
+    const requestCounts = { GRU: 0, MIA: 0 };
+    const colors = { GRU: "#007acc", MIA: "#e76f51" };
+
+    // Bar chart setup
+    const barSvg = d3.select("#barChart");
+    const barWidth = +barSvg.attr("width");
+    const barHeight = +barSvg.attr("height");
+    const barX = d3.scaleLinear().range([0, barWidth - 100]);
+    const barY = d3.scaleBand().range([0, barHeight]).padding(0.4);
+
+    // Pie chart setup
+    const pieSvg = d3.select("#pieChart");
+    const pieWidth = +pieSvg.attr("width");
+    const pieHeight = +pieSvg.attr("height");
+    const pieRadius = Math.min(pieWidth, pieHeight) / 2 - 10;
+    const pieGroup = pieSvg.append("g")
+        .attr("transform", `translate(${pieWidth / 2}, ${pieHeight / 2})`);
+    const pie = d3.pie().value(d => d.value);
+    const arc = d3.arc().innerRadius(0).outerRadius(pieRadius);
+
+    // Sankey setup
+    const sankeySvg = d3.select("#sankeyChart");
+    const sankeyWidth = +sankeySvg.attr("width");
+    const sankeyHeight = +sankeySvg.attr("height");
+
+    const sankey = d3.sankey()
+        .nodeWidth(20)
+        .nodePadding(30)
+        .extent([[1, 1], [sankeyWidth - 1, sankeyHeight - 1]]);
+
+    const sankeyGroup = sankeySvg.append("g");
+
+    function updateCharts(gru, mia) {
+        console.log("GRU " + gru + "MIA " + mia);
+        requestCounts.GRU += gru;
+        requestCounts.MIA += mia;
+
+        const data = Object.entries(requestCounts).map(([key, value]) => ({ key, value }));
+
+        // --- Bar Chart ---
+        barX.domain([0, d3.max(data, d => d.value)]);
+        barY.domain(data.map(d => d.key));
+
+        const bars = barSvg.selectAll(".bar").data(data, d => d.key);
+        bars.enter()
+            .append("rect")
+            .attr("class", "bar")
+            .attr("y", d => barY(d.key))
+            .attr("x", 100)
+            .attr("width", 0)
+            .attr("height", barY.bandwidth())
+            .attr("fill", d => colors[d.key])
+            .merge(bars)
+            .transition().duration(800)
+            .attr("y", d => barY(d.key))
+            .attr("width", d => barX(d.value));
+
+        const labels = barSvg.selectAll(".label").data(data, d => d.key);
+        labels.enter()
+            .append("text")
+            .attr("class", "label")
+            .attr("x", 10)
+            .attr("y", d => barY(d.key) + barY.bandwidth() / 2 + 5)
+            .text(d => d.key)
+            .merge(labels)
+            .transition().duration(800)
+            .attr("y", d => barY(d.key) + barY.bandwidth() / 2 + 5)
+            .text(d => `${d.key}: ${d.value}`);
+
+        // --- Pie Chart ---
+        const total = data.reduce((sum, d) => sum + d.value, 0);
+        const pieData = data.map(d => ({
+            ...d,
+            percent: ((d.value / total) * 100).toFixed(1)
+        }));
+
+        const piePaths = pieGroup.selectAll("path").data(pie(pieData), d => d.data.key);
+        piePaths.enter()
+            .append("path")
+            .attr("fill", d => colors[d.data.key])
+            .attr("d", arc)
+            .each(function (d) { this._current = d; })
+            .merge(piePaths)
+            .transition().duration(800)
+            .attrTween("d", function (d) {
+                const i = d3.interpolate(this._current, d);
+                this._current = i(1);
+                return t => arc(i(t));
+            });
+
+        const pieTexts = pieGroup.selectAll("text").data(pie(pieData), d => d.data.key);
+        pieTexts.enter()
+            .append("text")
+            .attr("text-anchor", "middle")
+            .attr("fill", "white")
+            .attr("font-size", "14px")
+            .merge(pieTexts)
+            .transition().duration(800)
+            .attr("transform", d => `translate(${arc.centroid(d)})`)
+            .text(d => `${d.data.key}: ${d.data.percent}%`);
+
+        // --- Sankey Diagram ---
+        const sankeyData = {
+            nodes: [
+                { name: "Requests" },
+                { name: "GRU" },
+                { name: "MIA" }
+            ],
+            links: [
+                { source: 0, target: 1, value: requestCounts.GRU },
+                { source: 0, target: 2, value: requestCounts.MIA }
+            ]
+        };
+
+        const graph = sankey(sankeyData);
+
+        const link = sankeyGroup.selectAll(".link").data(graph.links, d => d.target.name);
+        link.enter()
+            .append("path")
+            .attr("class", "link")
+            .attr("fill", "none")
+            .attr("stroke-opacity", 0.4)
+            .attr("stroke", d => colors[d.target.name])
+            .attr("stroke-width", d => Math.max(1, d.width))
+            .merge(link)
+            .transition().duration(800)
+            .attr("d", d3.sankeyLinkHorizontal())
+            .attr("stroke-width", d => Math.max(1, d.width));
+
+        const nodes = sankeyGroup.selectAll(".node").data(graph.nodes, d => d.name);
+        const nodeEnter = nodes.enter()
+            .append("g")
+            .attr("class", "node");
+
+        nodeEnter.append("rect")
+            .attr("fill", d => colors[d.name] || "#aaa")
+            .attr("stroke", "#000");
+
+        nodeEnter.append("text")
+            .attr("x", -6)
+            .attr("y", d => (d.y1 - d.y0) / 2)
+            .attr("dy", "0.35em")
+            .attr("text-anchor", "end")
+            .attr("font-size", "12px")
+            .text(d => d.name);
+
+        nodes.merge(nodeEnter).select("rect")
+            .transition().duration(800)
+            .attr("x", d => d.x0)
+            .attr("y", d => d.y0)
+            .attr("height", d => d.y1 - d.y0)
+            .attr("width", d => d.x1 - d.x0);
+
+        nodes.merge(nodeEnter).select("text")
+            .transition().duration(800)
+            .attr("x", d => d.x0 - 6)
+            .attr("y", d => (d.y0 + d.y1) / 2);
+    }
+
+    console.log("Creating hub connection")
+    const connection = new signalR.HubConnectionBuilder()
+        .withUrl("/requestHub")
+        .build();
+    console.log("Define connection info refresh function")
+    connection.on("UpdateRequestCount", function (count) {
+        gru = 0; mia = 0;
+        if (count === "gru") {
+            gru = 1;
+        } else {
+            mia = 1;
+        }
+
+        updateCharts(gru, mia);
+
+    });
+
+    connection.start().catch(err => console.error(err.toString()));
+</script>
