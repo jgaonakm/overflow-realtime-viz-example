@@ -1,0 +1,33 @@
+kind: Deployment
+apiVersion: apps/v1
+metadata:
+  name: site
+  labels:
+    app: site
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: site
+  template:
+    metadata:
+      labels:
+        app: site
+    spec:
+      containers:
+      - name: site
+        image: jgaonaakm/ovfrtvizsite:latest
+        imagePullPolicy: Always
+        ports:
+        - containerPort: 8080
+          name: http
+        env:
+          # SignalR hub location where we notify a request was received
+          - name: HUB
+            value: "[hub]"
+          # Used for identifying the site where the app is running and calculate the request # in the charts. 
+          # In this example we have two options: gru (São Paulo, BR) and mia (Miami, USA)
+          - name: SITE
+            value: "gru" 
+
+  
